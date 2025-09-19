@@ -1,5 +1,7 @@
 import os
 import logging
+import sys
+import io
 from logging.handlers import RotatingFileHandler
 from typing import List
 
@@ -26,7 +28,7 @@ def _parse_list(value: str | None) -> List[str]:
 # ================== CORE TELEGRAM CONFIG ==================
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
-SESSION_NAME = os.getenv("SESSION_NAME", "memecoin_session")
+SESSION_NAME = os.getenv("SESSION_NAME", "var/memecoin_session")
 
 # Comma-separated `@channel` usernames or titles. Empty -> defaults below
 ENV_MONITORED = os.getenv("MONITORED_GROUPS", "").strip()
@@ -101,6 +103,27 @@ VOL_15M_X = float(os.getenv("VOL_15M_X", "2.5"))
 # Market sanity
 LIQ_MIN_USD = float(os.getenv("LIQ_MIN_USD", "15000"))
 VOL24_MIN_USD = float(os.getenv("VOL24_MIN_USD", "50000"))
+T1_MARKET_REQUIRED = _env_bool("T1_MARKET_REQUIRED", False)
+
+# Philosophy-driven Tier thresholds
+# Tier 2 (Confirmation)
+T2_HOLDERS_MIN = int(os.getenv("T2_HOLDERS_MIN", "250"))
+T2_LIQ_MIN_USD = float(os.getenv("T2_LIQ_MIN_USD", "50000"))
+T2_LIQ_DRAWDOWN_MAX_PCT = float(os.getenv("T2_LIQ_DRAWDOWN_MAX_PCT", "10"))
+T2_TXNS_H1_MIN = int(os.getenv("T2_TXNS_H1_MIN", "500"))
+T2_BUY_SELL_RATIO_MIN = float(os.getenv("T2_BUY_SELL_RATIO_MIN", "1.5"))
+T2_AGE_MIN_MINUTES = int(os.getenv("T2_AGE_MIN_MINUTES", "30"))
+T2_AGE_MAX_MINUTES = int(os.getenv("T2_AGE_MAX_MINUTES", "90"))
+
+# Tier 3 (Momentum)
+T3_MCAP_MIN_USD = float(os.getenv("T3_MCAP_MIN_USD", "500000"))
+T3_VOL24_MIN_USD = float(os.getenv("T3_VOL24_MIN_USD", "2000000"))
+T3_PRICE_MIN_X = float(os.getenv("T3_PRICE_MIN_X", "5"))
+T3_PRICE_MAX_X = float(os.getenv("T3_PRICE_MAX_X", "20"))
+T3_HOLDERS_MIN = int(os.getenv("T3_HOLDERS_MIN", "1500"))
+T3_POS_TREND_REQUIRED = _env_bool("T3_POS_TREND_REQUIRED", True)
+T3_AGE_MIN_MINUTES = int(os.getenv("T3_AGE_MIN_MINUTES", "120"))
+T3_AGE_MAX_MINUTES = int(os.getenv("T3_AGE_MAX_MINUTES", "240"))
 
 # Scoring thresholds
 STRONG_SCORE_MIN = float(os.getenv("STRONG_SCORE_MIN", "8"))
@@ -112,8 +135,13 @@ VIP_WALLETS = _parse_list(os.getenv("VIP_WALLETS", ""))
 VIP_WALLETS_FILE = os.getenv("VIP_WALLETS_FILE", "vip_wallets.json")
 VIP_MAX_WALLETS = int(os.getenv("VIP_MAX_WALLETS", "50"))
 VIP_POLL_SECONDS = int(os.getenv("VIP_POLL_SECONDS", "60"))
+VIP_WALLETS_PER_CYCLE = int(os.getenv("VIP_WALLETS_PER_CYCLE", "50"))
 
-SOLANA_RPC_URLS: List[str] = [url.strip() for url in os.getenv(
+def _normalize_url(u: str) -> str:
+    # Trim whitespace and stray trailing slashes or backslashes which can break requests
+    return u.strip().rstrip('/').rstrip('\\')
+
+SOLANA_RPC_URLS: List[str] = [_normalize_url(url) for url in os.getenv(
     "SOLANA_RPC_URLS",
     "https://api.mainnet-beta.solana.com,https://rpc.ankr.com/solana",
 ).split(',') if url.strip()]
@@ -126,10 +154,11 @@ BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "").strip()
 HTTP_TIMEOUT_SEC = float(os.getenv("HTTP_TIMEOUT_SEC", "15"))
 HTTP_RETRIES = int(os.getenv("HTTP_RETRIES", "3"))
 RETRY_BACKOFF_SEC = float(os.getenv("RETRY_BACKOFF_SEC", "1.5"))
+RPC_MAX_RPS = float(os.getenv("RPC_MAX_RPS", "10"))  # max RPC requests per second (approx)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_JSON = _env_bool("LOG_JSON", False)
-LOG_FILE = os.getenv("LOG_FILE", "bot.log")
+LOG_FILE = os.getenv("LOG_FILE", "var/bot.log")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "1048576"))  # 1MB
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
@@ -174,15 +203,25 @@ def setup_logging() -> None:
     else:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    # Console
-    ch = logging.StreamHandler()
+    # Console with UTF-8 fallback on Windows consoles that default to cp1252
+    try:
+        stream = sys.stdout
+        enc = getattr(stream, "encoding", None)
+        if not enc or str(enc).lower() != "utf-8":
+            try:
+                stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+            except Exception:
+                stream = sys.stdout
+        ch = logging.StreamHandler(stream)
+    except Exception:
+        ch = logging.StreamHandler()
     ch.setLevel(level)
     ch.setFormatter(formatter)
     root.addHandler(ch)
 
     # Rotating file handler
     if LOG_FILE:
-        fh = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
+        fh = RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
         fh.setLevel(level)
         fh.setFormatter(formatter)
         root.addHandler(fh)
@@ -194,4 +233,11 @@ import re
 # 32–44 Base58 chars, excluding ambiguous 0 O I l, with boundaries
 CA_PATTERN = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])")
 
+
+# ================== STATE & HEALTH ==================
+# Where to write bot state so restarts don't resend old alerts
+STATE_FILE = os.getenv("STATE_FILE", "var/state.json")
+# How often to save state and emit heartbeat logs
+STATE_SAVE_SECONDS = int(os.getenv("STATE_SAVE_SECONDS", "60"))
+HEALTH_LOG_SECONDS = int(os.getenv("HEALTH_LOG_SECONDS", "60"))
 

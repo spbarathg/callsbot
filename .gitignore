@@ -1,34 +1,30 @@
-# Environment & secrets
-.env
-
-# Telethon session files
-*.session
-.env
-bot.log*
-__pycache__/
-.venv/
-*.pyc
-*.session-journal
-
-# Python artifacts
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
 
-# Virtual environments
+# Envs & venvs
+.env
 .venv/
 venv/
-env/
+ENV/
 
-# IDE & OS files
-.idea/
-.vscode/
+# Telethon session
+*.session
+*.session-journal
+var/
+
+# State & logs
+state.json
+*.log
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Builds
-build/
-dist/
-pip-wheel-metadata/
+# IDE
+.vscode/
+.idea/
 
 
 

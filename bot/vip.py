@@ -4,7 +4,7 @@ import os
 import asyncio
 from typing import List, Set, Dict
 
-from config.config import VIP_WALLETS, VIP_WALLETS_FILE, VIP_MAX_WALLETS, VIP_POLL_SECONDS
+from config.config import VIP_WALLETS, VIP_WALLETS_FILE, VIP_MAX_WALLETS, VIP_POLL_SECONDS, VIP_WALLETS_PER_CYCLE
 from bot.apis import solana_rpc
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ async def vip_watcher_loop(mentions_by_ca: Dict[str, list], vip_holders_by_ca: D
     if not vip_wallets:
         logger.info("No VIP wallets configured; VIP watcher idle")
         return
-    logger.info(f"VIP wallets loaded: {len(vip_wallets)} (poll {VIP_POLL_SECONDS}s)")
+    logger.info(f"VIP wallets loaded: {len(vip_wallets)} (poll {VIP_POLL_SECONDS}s, batch {VIP_WALLETS_PER_CYCLE})")
     while not stop_event.is_set():
         try:
             cas = list(mentions_by_ca.keys())
@@ -71,9 +71,17 @@ async def vip_watcher_loop(mentions_by_ca: Dict[str, list], vip_holders_by_ca: D
                 await asyncio.sleep(VIP_POLL_SECONDS)
                 continue
             for ca in cas:
-                holders = await count_vip_holders_for_token(ca, vip_wallets)
-                if holders:
-                    vip_holders_by_ca[ca] = holders
+                # Process VIP wallets in chunks to reduce burst RPC
+                step = max(1, int(VIP_WALLETS_PER_CYCLE))
+                for i in range(0, len(vip_wallets), step):
+                    chunk = vip_wallets[i:i+step]
+                    holders = await count_vip_holders_for_token(ca, chunk)
+                    if holders:
+                        if ca not in vip_holders_by_ca:
+                            vip_holders_by_ca[ca] = set()
+                        vip_holders_by_ca[ca].update(holders)
+                    # small pause between chunks to avoid hitting per-second caps
+                    await asyncio.sleep(max(0.0, VIP_POLL_SECONDS / max(1, (len(vip_wallets) // step)) / 4))
         except Exception as e:
             logger.warning(f"VIP watcher error: {e}")
         await asyncio.sleep(VIP_POLL_SECONDS)

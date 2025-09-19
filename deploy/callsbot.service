@@ -1,0 +1,24 @@
+[Unit]
+Description=Calls Bot (Telegram signals)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/callsbot
+EnvironmentFile=/opt/callsbot/.env
+ExecStart=/usr/bin/python -m bot.main
+Restart=always
+RestartSec=5
+User=callsbot
+Group=callsbot
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+
+

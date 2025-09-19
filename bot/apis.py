@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import logging
@@ -13,6 +12,7 @@ from config.config import (
     HTTP_TIMEOUT_SEC,
     HTTP_RETRIES,
     RETRY_BACKOFF_SEC,
+    RPC_MAX_RPS,
 )
 from bot.utils import with_retries
 
@@ -92,12 +92,36 @@ async def get_dex_metrics(ca: str) -> Dict[str, Any]:
     vol1h = ((pair.get('volume') or {}).get('h1')) or 0
     symbol = ((pair.get('baseToken') or {}).get('symbol')) or None
     price = pair.get('priceUsd')
+    market_cap = pair.get('marketCap') or pair.get('fdv') or 0
+    txns = pair.get('txns') or {}
+    tx_h1 = (txns.get('h1') or {}) if isinstance(txns, dict) else {}
+    buys_h1 = float(tx_h1.get('buys') or 0)
+    sells_h1 = float(tx_h1.get('sells') or 0)
+    total_h1 = buys_h1 + sells_h1
+    bs_ratio_h1 = (buys_h1 / sells_h1) if sells_h1 > 0 else (buys_h1 if buys_h1 > 0 else 0)
+    price_change = pair.get('priceChange') or {}
+    pc_m5 = float((price_change.get('m5') or 0) if isinstance(price_change, dict) else 0)
+    pc_m15 = float((price_change.get('m15') or 0) if isinstance(price_change, dict) else 0)
+    pc_h1 = float((price_change.get('h1') or 0) if isinstance(price_change, dict) else 0)
+    created_ms = pair.get('pairCreatedAt') or pair.get('createdAt')
+    trending_score = pair.get('trendingScore') or 0
+    is_hot = bool(pair.get('isHot')) or (float(trending_score or 0) > 0)
     return {
         'liquidity_usd': float(liq or 0),
         'volume24_usd': float(vol or 0),
         'volume1h_usd': float(vol1h or 0),
         'symbol': symbol,
         'price_usd': float(price or 0) if price else None,
+        'market_cap_usd': float(market_cap or 0),
+        'txns_h1_buys': int(buys_h1),
+        'txns_h1_sells': int(sells_h1),
+        'txns_h1_total': int(total_h1),
+        'buy_sell_ratio_h1': float(bs_ratio_h1),
+        'price_change_m5': pc_m5,
+        'price_change_m15': pc_m15,
+        'price_change_h1': pc_h1,
+        'pair_created_ms': int(created_ms or 0) if created_ms else None,
+        'trending': is_hot,
     }
 
 
@@ -122,15 +146,25 @@ async def get_birdeye_overview(ca: str) -> Dict[str, Any]:
 
 # ================== Solana RPC ==================
 _rpc_index = 0
+_last_rpc_ts = 0.0
 
 
 async def solana_rpc(method: str, params: list) -> Any:
-    global _rpc_index
+    global _rpc_index, _last_rpc_ts
     if not SOLANA_RPC_URLS:
         raise RuntimeError("No Solana RPC URLs configured")
     url = SOLANA_RPC_URLS[_rpc_index % len(SOLANA_RPC_URLS)]
     _rpc_index += 1
     payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    # Simple token-bucket style throttle to respect RPC_MAX_RPS
+    if RPC_MAX_RPS and RPC_MAX_RPS > 0:
+        import time, asyncio as _asyncio
+        min_interval = 1.0 / RPC_MAX_RPS
+        now = time.perf_counter()
+        sleep_for = _last_rpc_ts + min_interval - now
+        if sleep_for > 0:
+            await _asyncio.sleep(sleep_for)
+        _last_rpc_ts = time.perf_counter()
     try:
         data = await http_client.post_json(url, payload)
     except Exception as e:

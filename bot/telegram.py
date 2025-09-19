@@ -21,8 +21,12 @@ from config.config import (
     HOT_THRESHOLD,
     HOT_RESET_HOURS,
     CA_PATTERN,
+    STATE_FILE,
+    STATE_SAVE_SECONDS,
+    HEALTH_LOG_SECONDS,
 )
 from bot.evaluator import Evaluator
+from bot.utils import read_json, write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +39,27 @@ class Bot:
         self.coin_tier_state: dict[str, int] = {}
         self.last_t1_sent_utc: dict[str, datetime] = {}
         self.last_reset_utc = datetime.utcnow()
+        self._bg_tasks: set[asyncio.Task] = set()
+        self._stop_event = asyncio.Event()
 
     async def start(self) -> None:
         await self.client.start()
         self.evaluator = Evaluator(self._send_evaluator_message)
+        await self._load_state()
         self.client.add_event_handler(self._on_message, events.NewMessage(chats=MONITORED_GROUPS if MONITORED_GROUPS else None))
         logger.info("Client started. Monitoring groups... Press Ctrl+C to stop.")
+        self._bg_tasks.add(asyncio.create_task(self._state_saver_loop()))
+        self._bg_tasks.add(asyncio.create_task(self._health_loop()))
 
     async def stop(self) -> None:
+        self._stop_event.set()
+        for t in list(self._bg_tasks):
+            t.cancel()
+        try:
+            await asyncio.gather(*self._bg_tasks, return_exceptions=True)
+        finally:
+            self._bg_tasks.clear()
+        await self._save_state()
         await self.client.disconnect()
 
     def _maybe_reset_counts(self) -> None:
@@ -52,6 +69,12 @@ class Bot:
             self.coin_counts = {}
             self.last_reset_utc = datetime.utcnow()
             logger.info("Hot counts reset due to window elapsed")
+        # Guardrail: cap coin_counts size to avoid unbounded memory
+        max_entries = 5000
+        if len(self.coin_counts) > max_entries:
+            # keep top-N by count
+            top = sorted(self.coin_counts.items(), key=lambda kv: kv[1], reverse=True)[:1000]
+            self.coin_counts = {k: v for k, v in top}
 
     async def _on_message(self, event: events.NewMessage.Event) -> None:
         try:
@@ -74,6 +97,9 @@ class Bot:
 
             if ENABLE_EVALUATOR and self.evaluator:
                 await self.evaluator.process_mention(ca, channel_key)
+                # prune periodically to avoid growth
+                if self.evaluator and (len(self.evaluator.state.mentions_by_ca) % 25 == 0):
+                    self.evaluator.prune_memory()
             elif ENABLE_TIERED_ALERTS:
                 await self._maybe_send_tiered_alert(ca, group_name, new_count)
             else:
@@ -136,5 +162,74 @@ class Bot:
             await self._send_alert_message(ca, tier_label=f"T3 GO ({count} mentions)", header_prefix=">>> SIGNAL", group_name=group_name)
             self.coin_tier_state[ca] = 3
             return
+
+    async def _load_state(self) -> None:
+        try:
+            data = await read_json(STATE_FILE)
+            if not data:
+                return
+            if isinstance(data, dict):
+                lrs = data.get("last_rank_sent")
+                t1 = data.get("t1_price_usd")
+                first_seen = data.get("first_seen_ts")
+                peak_liq = data.get("peak_liquidity_usd")
+                tiers = data.get("coin_tier_state")
+                last_t1 = data.get("last_t1_sent_utc")
+                if self.evaluator:
+                    self.evaluator.load_persisted_state({
+                        "last_rank_sent": lrs,
+                        "t1_price_usd": t1,
+                        "first_seen_ts": first_seen,
+                        "peak_liquidity_usd": peak_liq,
+                    })
+                if isinstance(tiers, dict):
+                    self.coin_tier_state.update({str(k): int(v) for k, v in tiers.items()})
+                if isinstance(last_t1, dict):
+                    # store as ISO strings
+                    for k, v in last_t1.items():
+                        try:
+                            self.last_t1_sent_utc[str(k)] = datetime.fromisoformat(str(v))
+                        except Exception:
+                            continue
+            logger.info("State loaded")
+        except Exception as e:
+            logger.warning(f"Failed to load state: {e}")
+
+    async def _save_state(self) -> None:
+        try:
+            payload = {
+                **(self.evaluator.to_persisted_state() if self.evaluator else {}),
+                "coin_tier_state": dict(self.coin_tier_state),
+                "last_t1_sent_utc": {k: v.isoformat() for k, v in self.last_t1_sent_utc.items()},
+            }
+            await write_json_atomic(STATE_FILE, payload)
+        except Exception as e:
+            logger.warning(f"Failed to save state: {e}")
+
+    async def _state_saver_loop(self) -> None:
+        try:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(STATE_SAVE_SECONDS)
+                await self._save_state()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"State saver error: {e}")
+
+    async def _health_loop(self) -> None:
+        try:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(HEALTH_LOG_SECONDS)
+                num_groups = len(MONITORED_GROUPS or [])
+                num_coins = len(self.coin_counts)
+                lrs = len(self.evaluator.state.last_rank_sent) if self.evaluator else 0
+                mentions_keys = len(self.evaluator.state.mentions_by_ca) if self.evaluator else 0
+                logger.info(
+                    f"HEALTH groups={num_groups} coins_seen={num_coins} mentions_tracked={mentions_keys} last_ranked={lrs}"
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"Health loop error: {e}")
 
 
