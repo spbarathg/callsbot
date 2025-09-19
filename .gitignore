@@ -1,0 +1,34 @@
+# Environment & secrets
+.env
+
+# Telethon session files
+*.session
+.env
+bot.log*
+__pycache__/
+.venv/
+*.pyc
+*.session-journal
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE & OS files
+.idea/
+.vscode/
+.DS_Store
+
+# Builds
+build/
+dist/
+pip-wheel-metadata/
+
+
+
