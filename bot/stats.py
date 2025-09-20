@@ -15,7 +15,7 @@ from config.config import (
     STATS_DB_PATH,
     STATS_SNAPSHOT_INTERVAL_SEC,
 )
-from config.config import STATS_JSONL_MAX_BYTES, STATS_MAX_JSONL_FILES
+from config.config import STATS_JSONL_MAX_BYTES, STATS_MAX_JSONL_FILES, STATS_RETENTION_DAYS
 from bot.phanes import phanes_forward_signal, phanes_forward_outcome, phanes_is_enabled
 
 
@@ -436,6 +436,26 @@ class StatsRecorder:
                 (o.ts_utc, o.ca, o.horizon_min, o.roi_pct, o.price_start_usd, o.price_end_usd),
             )
             await db.commit()
+
+    async def maybe_maintain_storage(self) -> None:
+        if not self.enabled:
+            return
+        import aiosqlite
+        await self.init()
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                try:
+                    for table in ("signals", "snapshots", "mentions", "holders", "outcomes"):
+                        await db.execute(
+                            f"DELETE FROM {table} WHERE ts_utc < datetime('now', ?)",
+                            (f"-{int(STATS_RETENTION_DAYS)} days",),
+                        )
+                except Exception:
+                    pass
+                await db.execute("VACUUM")
+                await db.commit()
+        except Exception:
+            pass
 
 
 async def evaluate_roi_for_ca(ca: str, minutes: int, fetch_price_fn) -> Optional[OutcomeEvent]:

@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  callsbot:
+    build: .
+    image: callsbot:latest
+    restart: unless-stopped
+    environment:
+      - API_ID=${API_ID}
+      - API_HASH=${API_HASH}
+      - TARGET_GROUP=${TARGET_GROUP}
+      - SOLANA_RPC_URLS=${SOLANA_RPC_URLS}
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=${METRICS_PORT:-9000}
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./var:/app/var
+      - ./.env:/app/.env:ro
+    command: ["python", "-m", "bot.main"]
+

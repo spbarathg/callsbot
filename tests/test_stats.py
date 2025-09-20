@@ -1,8 +1,10 @@
 import os
 import asyncio
+import pytest
 from bot.stats import StatsRecorder, SignalEvent
 
 
+@pytest.mark.asyncio
 async def test_stats_signal_jsonl(tmp_path):
     os.environ['ENABLE_STATS'] = 'true'
     sr = StatsRecorder()

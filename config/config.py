@@ -10,12 +10,6 @@ from dotenv import load_dotenv
 
 # Load .env early
 load_dotenv()
-# ================== METRICS ==================
-METRICS_ENABLED = _env_bool("METRICS_ENABLED", True)
-METRICS_PORT = int(os.getenv("METRICS_PORT", "9000"))
-
-
-
 def _env_bool(name: str, default: bool) -> bool:
     val = os.getenv(name)
     if val is None:
@@ -27,6 +21,11 @@ def _parse_list(value: str | None) -> List[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(',') if item.strip()]
+
+
+# ================== METRICS ==================
+METRICS_ENABLED = _env_bool("METRICS_ENABLED", True)
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9000"))
 
 
 # ================== CORE TELEGRAM CONFIG ==================
@@ -179,6 +178,7 @@ STATS_SNAPSHOT_INTERVAL_SEC = int(os.getenv("STATS_SNAPSHOT_INTERVAL_SEC", "60")
 STATS_JSONL_MAX_BYTES = int(os.getenv("STATS_JSONL_MAX_BYTES", str(50 * 1024 * 1024)))  # 50MB
 STATS_MAX_JSONL_FILES = int(os.getenv("STATS_MAX_JSONL_FILES", "30"))
 STATS_MAINTENANCE_INTERVAL_SEC = int(os.getenv("STATS_MAINTENANCE_INTERVAL_SEC", str(60 * 60)))  # hourly
+STATS_RETENTION_DAYS = int(os.getenv("STATS_RETENTION_DAYS", "14"))
 
 
 # ================== PHANES INTEGRATION ==================

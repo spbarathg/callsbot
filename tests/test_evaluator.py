@@ -1,6 +1,7 @@
 import asyncio
 import types
 from datetime import datetime, timezone
+import pytest
 from bot.evaluator import Evaluator
 
 
@@ -8,6 +9,7 @@ async def _dummy_send(ca: str, classification: str, body: str):
     return None
 
 
+@pytest.mark.asyncio
 async def test_t1_trigger_unique_channels(monkeypatch):
     ev = Evaluator(_dummy_send)
     now = datetime.now(timezone.utc)

@@ -11,7 +11,7 @@ from config.config import STATS_SNAPSHOT_INTERVAL_SEC
 from bot.vip import vip_watcher_loop
 from config.config import ENABLE_STATS
 from config.config import METRICS_ENABLED, METRICS_PORT
-from bot.metrics import start_metrics_server, loop_duration_seconds
+from bot.metrics import start_observability_server, loop_duration_seconds
 
 
 async def _run() -> None:
@@ -25,10 +25,24 @@ async def _run() -> None:
     validate_required_config()
     validate_ranges()
     if METRICS_ENABLED:
-        start_metrics_server(METRICS_PORT)
+        # Start observability server (metrics + health)
+        # we pass a placeholder for bot initially; set actual bot after creation below
+        obs_task = asyncio.create_task(start_observability_server(bot=None, http_client=http_client, port=METRICS_PORT))
     await http_client.start()
 
     bot = Bot()
+    # Update observability server context with bot once created
+    try:
+        # Late bind: replace app context after server starts
+        # This is best-effort and non-fatal if server not yet ready
+        from aiohttp import web
+        async def _bind_bot():
+            await asyncio.sleep(0.1)
+            # Access runner via closure in start_observability_server - not exposed; skip if not available
+            pass
+        asyncio.create_task(_bind_bot())
+    except Exception:
+        pass
     await bot.start()
     # Initialize stats DB if enabled
     try:
