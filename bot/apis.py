@@ -6,8 +6,6 @@ from typing import Any, Dict, Optional
 import aiohttp
 
 from config.config import (
-    ENABLE_BIRDEYE,
-    BIRDEYE_API_KEY,
     SOLANA_RPC_URLS,
     HTTP_TIMEOUT_SEC,
     HTTP_RETRIES,

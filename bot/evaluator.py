@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from config.config import (
     OVERLAP_WINDOW_MIN,
     MIN_UNIQUE_CHANNELS_T1,
-    T3_MIN_UNIQUE_CHANNELS,
     VEL5_WINDOW_MIN,
     VEL10_WINDOW_MIN,
     MENTION_DECAY_HALF_LIFE_MIN,
@@ -39,6 +38,7 @@ from config.config import (
     T3_AGE_MAX_MINUTES,
 )
 from bot.apis import get_dex_metrics, solana_get_account_info, solana_rpc
+from bot.stats import StatsRecorder, SignalEvent
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,7 @@ class Evaluator:
     def __init__(self, send_message_fn) -> None:
         self.state = EvaluatorState()
         self.send_message = send_message_fn
+        self.stats = StatsRecorder()
 
     def to_persisted_state(self) -> Dict[str, Any]:
         return {
@@ -189,6 +190,12 @@ class Evaluator:
                 if amt > max_amount:
                     max_amount = amt
             largest_pct = (max_amount / supply * 100.0) if supply > 0 else 100.0
+            # Record holders snapshot for analytics
+            try:
+                if self.stats:
+                    await self.stats.record_holders(ca, supply, largest_pct, unique_holders)
+            except Exception:
+                pass
             return (unique_holders >= HOLDERS_THRESHOLD and largest_pct <= LARGEST_WALLET_MAX)
         except Exception as e:
             logger.warning(f"Holders/whale check failed for {ca}: {e}")
@@ -353,6 +360,29 @@ class Evaluator:
         await self.send_message(ca, classification, msg)
         self.state.last_rank_sent[ca] = classification
         logger.info(f"Consensus alert sent [{classification}] for {ca} (unique={len(unique_channels_recent)})")
+
+        # Record a structured signal snapshot for analytics
+        try:
+            if self.stats:
+                ev = SignalEvent(
+                    ts_utc=datetime.utcnow().isoformat() + "Z",
+                    ca=ca,
+                    symbol=symbol,
+                    classification=classification,
+                    source_channels=[m.channel for m in self.state.mentions_by_ca.get(ca, [])[:5]],
+                    uniques_OverlapMin=len(set([m.channel for m in self.state.mentions_by_ca.get(ca, [])])),
+                    mentions_total=len(self.state.mentions_by_ca.get(ca, [])),
+                    liquidity_usd=liquidity_usd,
+                    volume24_usd=volume24_usd,
+                    market_cap_usd=market_cap_usd,
+                    txns_h1_total=txns_h1_total,
+                    buy_sell_ratio_h1=bs_ratio,
+                    price_change_m15=price_change_m15,
+                    price_usd=float(dex.get('price_usd') or 0) if dex and dex.get('price_usd') else None,
+                )
+                await self.stats.record_signal(ev)
+        except Exception:
+            pass
 
 
 def parse_mint_safety(data: bytes) -> Tuple[bool, bool]:

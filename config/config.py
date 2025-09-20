@@ -76,7 +76,6 @@ HOT_RESET_HOURS = int(os.getenv("HOT_RESET_HOURS", "24"))
 # Social consensus
 OVERLAP_WINDOW_MIN = int(os.getenv("OVERLAP_WINDOW_MIN", "15"))
 MIN_UNIQUE_CHANNELS_T1 = int(os.getenv("T1_UNIQUE_GROUPS", os.getenv("MIN_UNIQUE_CHANNELS_T1", "4")))
-T3_MIN_UNIQUE_CHANNELS = int(os.getenv("T3_MIN_UNIQUE_CHANNELS", "8"))
 VEL5_WINDOW_MIN = int(os.getenv("VEL5_WINDOW_MIN", "5"))
 VEL10_WINDOW_MIN = int(os.getenv("VEL10_WINDOW_MIN", "10"))
 MENTION_DECAY_HALF_LIFE_MIN = float(os.getenv("MENTION_DECAY_HALF_LIFE_MIN", "60"))
@@ -92,9 +91,9 @@ MINT_SAFETY_REQUIRED = _env_bool("MINT_SAFETY_REQUIRED", True)
 # Momentum & virality
 PRICE_MULTIPLE_MIN = float(os.getenv("PRICE_MULTIPLE_MIN", "2"))
 PRICE_MULTIPLE_MAX = float(os.getenv("PRICE_MULTIPLE_MAX", "10"))
-BUYER_SELLER_RATIO = float(os.getenv("BUYER_SELLER_RATIO", "1.2"))
-HOLDER_GROWTH_PCT = float(os.getenv("HOLDER_GROWTH_PCT", "15"))
-HOLDER_GROWTH_WINDOW_MIN = int(os.getenv("HOLDER_GROWTH_WINDOW_MIN", "60"))
+BUYER_SELLER_RATIO = float(os.getenv("BUYER_SELLER_RATIO", "1.2"))  # reserved
+HOLDER_GROWTH_PCT = float(os.getenv("HOLDER_GROWTH_PCT", "15"))  # reserved
+HOLDER_GROWTH_WINDOW_MIN = int(os.getenv("HOLDER_GROWTH_WINDOW_MIN", "60"))  # reserved
 
 # Boost thresholds (auxiliary)
 PRICE_5M_PCT = float(os.getenv("PRICE_5M_PCT", "10"))
@@ -132,7 +131,7 @@ MEDIUM_SCORE_MIN = float(os.getenv("MEDIUM_SCORE_MIN", "5"))
 
 # ================== VIP & ENDPOINTS ==================
 VIP_WALLETS = _parse_list(os.getenv("VIP_WALLETS", ""))
-VIP_WALLETS_FILE = os.getenv("VIP_WALLETS_FILE", "vip_wallets.json")
+VIP_WALLETS_FILE = os.getenv("VIP_WALLETS_FILE", "")
 VIP_MAX_WALLETS = int(os.getenv("VIP_MAX_WALLETS", "50"))
 VIP_POLL_SECONDS = int(os.getenv("VIP_POLL_SECONDS", "60"))
 VIP_WALLETS_PER_CYCLE = int(os.getenv("VIP_WALLETS_PER_CYCLE", "50"))
@@ -160,6 +159,23 @@ LOG_JSON = _env_bool("LOG_JSON", False)
 LOG_FILE = os.getenv("LOG_FILE", "var/bot.log")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "1048576"))  # 1MB
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+
+
+# ================== STATS / ANALYTICS ==================
+ENABLE_STATS = _env_bool("ENABLE_STATS", True)
+STATS_DIR = os.getenv("STATS_DIR", "var/stats")
+STATS_FILE_SIGNALS = os.getenv("STATS_FILE_SIGNALS", "signals.jsonl")
+STATS_FILE_OUTCOMES = os.getenv("STATS_FILE_OUTCOMES", "outcomes.jsonl")
+STATS_ROI_HORIZONS_MIN = [int(x) for x in (os.getenv("STATS_ROI_HORIZONS_MIN", "5,15,60,240").split(",")) if x.strip()]
+STATS_DAILY_ROLLOVER_HOUR_UTC = int(os.getenv("STATS_DAILY_ROLLOVER_HOUR_UTC", "0"))
+STATS_DB_PATH = os.getenv("STATS_DB_PATH", "var/stats.db")
+STATS_SNAPSHOT_INTERVAL_SEC = int(os.getenv("STATS_SNAPSHOT_INTERVAL_SEC", "60"))
+
+
+# ================== PHANES INTEGRATION ==================
+PHANES_ENABLED = _env_bool("PHANES_ENABLED", False)
+PHANES_WEBHOOK_URL = os.getenv("PHANES_WEBHOOK_URL", "")
+PHANES_API_KEY = os.getenv("PHANES_API_KEY", "")
 
 
 # ================== VALIDATION ==================

@@ -7,16 +7,9 @@ from typing import Optional, List, Set
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, RPCError
 from telethon.tl.types import (
-    MessageEntityCode, 
-    MessageEntityPre, 
+    MessageEntityCode,
+    MessageEntityPre,
     MessageEntityTextUrl,
-    MessageEntityMention,
-    MessageEntityHashtag,
-    MessageEntityBold,
-    MessageEntityItalic,
-    MessageEntityUnderline,
-    MessageEntityStrike,
-    MessageEntitySpoiler
 )
 
 from config.config import (
@@ -41,6 +34,7 @@ from config.config import (
 )
 from bot.evaluator import Evaluator
 from bot.utils import read_json, write_json_atomic
+from bot.stats import StatsRecorder, SignalEvent
 
 logger = logging.getLogger(__name__)
 
@@ -259,8 +253,9 @@ def normalize_text_for_extraction(text: str) -> str:
     normalized = re.sub(r'[\u200b-\u200d\ufeff]', '', normalized)
     
     # Handle various quote types
-    normalized = normalized.replace('"', '"').replace('"', '"')
-    normalized = normalized.replace(''', "'").replace(''', "'")
+    # Standardize curly quotes to straight quotes
+    normalized = normalized.replace('“', '"').replace('”', '"')
+    normalized = normalized.replace('’', "'").replace('‘', "'")
     
     # Handle various dash types
     normalized = normalized.replace('–', '-').replace('—', '-')
@@ -278,6 +273,7 @@ class Bot:
     def __init__(self) -> None:
         self.client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
         self.evaluator: Optional[Evaluator] = None
+        self.stats: Optional[StatsRecorder] = StatsRecorder()
         self.coin_counts: dict[str, int] = {}
         self.coin_tier_state: dict[str, int] = {}
         self.last_t1_sent_utc: dict[str, datetime] = {}
@@ -340,6 +336,12 @@ class Bot:
                 new_count = self.coin_counts.get(ca, 0) + 1
                 self.coin_counts[ca] = new_count
                 logger.info(f"Detected CA {ca} in {group_name} (Count: {new_count})")
+                # Record mention row for analytics
+                try:
+                    if self.stats:
+                        await self.stats.record_mention(datetime.utcnow().isoformat() + "Z", ca, channel_key, str(getattr(event.message, 'id', '')))
+                except Exception:
+                    pass
 
                 if ENABLE_EVALUATOR and self.evaluator:
                     await self.evaluator.process_mention(ca, channel_key)
@@ -351,6 +353,28 @@ class Bot:
                 else:
                     if new_count == HOT_THRESHOLD:
                         await self._send_alert_message(ca, tier_label=f"T3 x{HOT_THRESHOLD}", header_prefix=">>> ALERT", group_name=group_name)
+                # Record a RAW detection event for analytics
+                try:
+                    if self.stats:
+                        ev = SignalEvent(
+                            ts_utc=datetime.utcnow().isoformat() + "Z",
+                            ca=ca,
+                            symbol=None,
+                            classification="RAW",
+                            source_channels=[channel_key],
+                            uniques_OverlapMin=0,
+                            mentions_total=self.coin_counts.get(ca, 0),
+                            liquidity_usd=0.0,
+                            volume24_usd=0.0,
+                            market_cap_usd=0.0,
+                            txns_h1_total=0,
+                            buy_sell_ratio_h1=0.0,
+                            price_change_m15=0.0,
+                            price_usd=None,
+                        )
+                        await self.stats.record_signal(ev)
+                except Exception:
+                    pass
                         
         except Exception as e:
             logger.exception(f"Handler error: {e}")
@@ -359,6 +383,32 @@ class Bot:
         try:
             links = self._build_links_line(ca)
             await self.client.send_message(TARGET_GROUP, body + "\n" + links, link_preview=False)
+            # Record structured signal for analytics
+            try:
+                if self.stats and self.evaluator:
+                    st = self.evaluator.state
+                    dex = st.dex_cache.get(ca) or {}
+                    mentions = st.mentions_by_ca.get(ca, [])
+                    channels = list({m.channel for m in mentions})[:5]
+                    ev = SignalEvent(
+                        ts_utc=datetime.utcnow().isoformat() + "Z",
+                        ca=ca,
+                        symbol=dex.get('symbol'),
+                        classification=classification,
+                        source_channels=channels,
+                        uniques_OverlapMin=0,
+                        mentions_total=len(mentions),
+                        liquidity_usd=float(dex.get('liquidity_usd') or 0.0),
+                        volume24_usd=float(dex.get('volume24_usd') or 0.0),
+                        market_cap_usd=float(dex.get('market_cap_usd') or 0.0),
+                        txns_h1_total=int(dex.get('txns_h1_total') or 0),
+                        buy_sell_ratio_h1=float(dex.get('buy_sell_ratio_h1') or 0.0),
+                        price_change_m15=float(dex.get('price_change_m15') or 0.0),
+                        price_usd=(float(dex.get('price_usd')) if dex.get('price_usd') else None),
+                    )
+                    await self.stats.record_signal(ev)
+            except Exception:
+                pass
         except FloodWaitError as e:
             logger.warning(f"Flood wait {e.seconds}s on alert send; delaying...")
             await asyncio.sleep(e.seconds)

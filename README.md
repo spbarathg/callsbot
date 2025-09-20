@@ -61,15 +61,23 @@ Key environment variables (defaults exist; see `config/config.py`):
 - `API_ID`, `API_HASH`, `SESSION_NAME`
 - `MONITORED_GROUPS`, `TARGET_GROUP`
 - `ENABLE_EVALUATOR`, `ENABLE_TIERED_ALERTS`, `T1_IMMEDIATE`, `T2_THRESHOLD_CALLS`, `T3_THRESHOLD_CALLS`, `COOLDOWN_MINUTES_T1`, `HOT_THRESHOLD`, `HOT_RESET_HOURS`
-- Evaluator thresholds: `OVERLAP_WINDOW_MIN`, `MIN_UNIQUE_CHANNELS_T1`, `T3_MIN_UNIQUE_CHANNELS`, `VEL5_WINDOW_MIN`, `VEL10_WINDOW_MIN`, `LIQ_THRESHOLD`, `VOL_1H_THRESHOLD`, `VOL_24H_THRESHOLD`, `HOLDERS_THRESHOLD`, `LARGEST_WALLET_MAX`, `MINT_SAFETY_REQUIRED`, `PRICE_MULTIPLE_MIN`, `PRICE_MULTIPLE_MAX`, `LIQ_MIN_USD`, `VOL24_MIN_USD`
+- Evaluator thresholds: `OVERLAP_WINDOW_MIN`, `MIN_UNIQUE_CHANNELS_T1`, `VEL5_WINDOW_MIN`, `VEL10_WINDOW_MIN`, `LIQ_THRESHOLD`, `VOL_1H_THRESHOLD`, `VOL_24H_THRESHOLD`, `HOLDERS_THRESHOLD`, `LARGEST_WALLET_MAX`, `MINT_SAFETY_REQUIRED`, `PRICE_MULTIPLE_MIN`, `PRICE_MULTIPLE_MAX`, `LIQ_MIN_USD`, `VOL24_MIN_USD`
 - Philosophy-driven tiers:
   - Tier 2 (Confirmation): `T2_HOLDERS_MIN` (default 250), `T2_LIQ_MIN_USD` (50_000), `T2_LIQ_DRAWDOWN_MAX_PCT` (10), `T2_TXNS_H1_MIN` (500), `T2_BUY_SELL_RATIO_MIN` (1.5), `T2_AGE_MIN_MINUTES` (30), `T2_AGE_MAX_MINUTES` (90)
   - Tier 3 (Momentum): `T3_MCAP_MIN_USD` (500_000), `T3_VOL24_MIN_USD` (2_000_000), `T3_PRICE_MIN_X` (5), `T3_PRICE_MAX_X` (20), `T3_HOLDERS_MIN` (1500), `T3_POS_TREND_REQUIRED` (true), `T3_AGE_MIN_MINUTES` (120), `T3_AGE_MAX_MINUTES` (240)
 - APIs: `SOLANA_RPC_URLS`
 - Logging: `LOG_LEVEL`, `LOG_JSON`, `LOG_FILE`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`
 
+### Phanes DApp integration
+- Set the following environment variables to forward your bot's analytics to Phanes (or any compatible collector):
+  - `PHANES_ENABLED=true`
+  - `PHANES_WEBHOOK_URL=https://<your-phanes-endpoint>/ingest`
+  - `PHANES_API_KEY=<optional bearer token>`
+
+When enabled, the bot forwards every Signal and Outcome event as JSON to the webhook, while still writing to `var/stats/*.jsonl` and SQLite. To use the Phanes DApp UI directly, invite the Phanes bot to your `TARGET_GROUP`, run `/dapp_active on`, and use `/dapp` to get a login link.
+
 ### Notes
-- `.gitignore` excludes `.env` and Telethon session files.
+- Create a `.gitignore` to exclude `.env`, Telethon session files, `var/`, SQLite DBs, and SSH keys.
 - Windows compatibility handled automatically.
 
 ### Philosophy-driven tiers (behavior)

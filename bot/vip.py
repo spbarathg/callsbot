@@ -6,6 +6,7 @@ from typing import List, Set, Dict
 
 from config.config import VIP_WALLETS, VIP_WALLETS_FILE, VIP_MAX_WALLETS, VIP_POLL_SECONDS, VIP_WALLETS_PER_CYCLE
 from bot.apis import solana_rpc
+from bot.stats import StatsRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ async def count_vip_holders_for_token(mint: str, vip_wallets: List[str]) -> Set[
     return holders
 
 
-async def vip_watcher_loop(mentions_by_ca: Dict[str, list], vip_holders_by_ca: Dict[str, Set[str]], stop_event: asyncio.Event) -> None:
+async def vip_watcher_loop(mentions_by_ca: Dict[str, list], vip_holders_by_ca: Dict[str, Set[str]], stop_event: asyncio.Event, stats: StatsRecorder | None = None) -> None:
     vip_wallets = load_vip_wallets()
     if not vip_wallets:
         logger.info("No VIP wallets configured; VIP watcher idle")
@@ -80,6 +81,13 @@ async def vip_watcher_loop(mentions_by_ca: Dict[str, list], vip_holders_by_ca: D
                         if ca not in vip_holders_by_ca:
                             vip_holders_by_ca[ca] = set()
                         vip_holders_by_ca[ca].update(holders)
+                        # Optionally record VIP holder evidence to DB for analytics
+                        if stats and stats.enabled:
+                            for w in holders:
+                                try:
+                                    await stats.record_vip_holder(ca, w)
+                                except Exception:
+                                    continue
                     # small pause between chunks to avoid hitting per-second caps
                     await asyncio.sleep(max(0.0, VIP_POLL_SECONDS / max(1, (len(vip_wallets) // step)) / 4))
         except Exception as e:
