@@ -1,10 +1,23 @@
 import logging
 import asyncio
+import re
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Set
 
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, RPCError
+from telethon.tl.types import (
+    MessageEntityCode, 
+    MessageEntityPre, 
+    MessageEntityTextUrl,
+    MessageEntityMention,
+    MessageEntityHashtag,
+    MessageEntityBold,
+    MessageEntityItalic,
+    MessageEntityUnderline,
+    MessageEntityStrike,
+    MessageEntitySpoiler
+)
 
 from config.config import (
     API_ID,
@@ -21,6 +34,7 @@ from config.config import (
     HOT_THRESHOLD,
     HOT_RESET_HOURS,
     CA_PATTERN,
+    CA_PATTERNS,
     STATE_FILE,
     STATE_SAVE_SECONDS,
     HEALTH_LOG_SECONDS,
@@ -29,6 +43,235 @@ from bot.evaluator import Evaluator
 from bot.utils import read_json, write_json_atomic
 
 logger = logging.getLogger(__name__)
+
+
+def extract_contract_addresses_from_message(event: events.NewMessage.Event) -> Set[str]:
+    """
+    Extract contract addresses from various message formats and entities.
+    Handles: raw text, code blocks, pre-formatted text, URLs, and other entities.
+    """
+    contract_addresses: Set[str] = set()
+    
+    # Get the message object
+    message = event.message
+    if not message:
+        return contract_addresses
+    
+    # Normalize and prepare text for extraction
+    raw_text = normalize_text_for_extraction(event.raw_text or "")
+    message_text = normalize_text_for_extraction(getattr(message, 'text', '') or "")
+    
+    # Combine all text sources
+    all_texts = [raw_text, message_text]
+    if raw_text != message_text:
+        all_texts.append(raw_text + " " + message_text)
+    
+    # Extract using all patterns from all text sources
+    for text in all_texts:
+        if not text:
+            continue
+            
+        # Apply all regex patterns
+        for pattern in CA_PATTERNS:
+            try:
+                matches = pattern.findall(text)
+                if isinstance(matches, list):
+                    for match in matches:
+                        if isinstance(match, tuple):
+                            # Handle patterns that return multiple groups
+                            for group in match:
+                                if group and isinstance(group, str):
+                                    contract_addresses.add(group)
+                        elif isinstance(match, str):
+                            contract_addresses.add(match)
+            except Exception as e:
+                logger.debug(f"Error applying pattern {pattern.pattern}: {e}")
+                continue
+    
+    # Extract from message entities
+    if hasattr(message, 'entities') and message.entities:
+        for entity in message.entities:
+            try:
+                # Handle code blocks (```code```)
+                if isinstance(entity, MessageEntityCode):
+                    start = entity.offset
+                    length = entity.length
+                    if start + length <= len(raw_text):
+                        code_text = raw_text[start:start + length]
+                        for pattern in CA_PATTERNS:
+                            matches = pattern.findall(code_text)
+                            if isinstance(matches, list):
+                                for match in matches:
+                                    if isinstance(match, tuple):
+                                        for group in match:
+                                            if group and isinstance(group, str):
+                                                contract_addresses.add(group)
+                                    elif isinstance(match, str):
+                                        contract_addresses.add(match)
+                
+                # Handle pre-formatted text (```language\ncode```)
+                elif isinstance(entity, MessageEntityPre):
+                    start = entity.offset
+                    length = entity.length
+                    if start + length <= len(raw_text):
+                        pre_text = raw_text[start:start + length]
+                        for pattern in CA_PATTERNS:
+                            matches = pattern.findall(pre_text)
+                            if isinstance(matches, list):
+                                for match in matches:
+                                    if isinstance(match, tuple):
+                                        for group in match:
+                                            if group and isinstance(group, str):
+                                                contract_addresses.add(group)
+                                    elif isinstance(match, str):
+                                        contract_addresses.add(match)
+                
+                # Handle text URLs (might contain contract addresses)
+                elif isinstance(entity, MessageEntityTextUrl):
+                    if entity.url:
+                        # Check if URL contains a contract address
+                        for pattern in CA_PATTERNS:
+                            url_matches = pattern.findall(entity.url)
+                            if isinstance(url_matches, list):
+                                for match in url_matches:
+                                    if isinstance(match, tuple):
+                                        for group in match:
+                                            if group and isinstance(group, str):
+                                                contract_addresses.add(group)
+                                    elif isinstance(match, str):
+                                        contract_addresses.add(match)
+                    
+                    # Also check the text part of the URL entity
+                    start = entity.offset
+                    length = entity.length
+                    if start + length <= len(raw_text):
+                        url_text = raw_text[start:start + length]
+                        for pattern in CA_PATTERNS:
+                            matches = pattern.findall(url_text)
+                            if isinstance(matches, list):
+                                for match in matches:
+                                    if isinstance(match, tuple):
+                                        for group in match:
+                                            if group and isinstance(group, str):
+                                                contract_addresses.add(group)
+                                    elif isinstance(match, str):
+                                        contract_addresses.add(match)
+                
+                # Handle other text entities (mentions, hashtags, etc.)
+                elif hasattr(entity, 'offset') and hasattr(entity, 'length'):
+                    start = entity.offset
+                    length = entity.length
+                    if start + length <= len(raw_text):
+                        entity_text = raw_text[start:start + length]
+                        for pattern in CA_PATTERNS:
+                            matches = pattern.findall(entity_text)
+                            if isinstance(matches, list):
+                                for match in matches:
+                                    if isinstance(match, tuple):
+                                        for group in match:
+                                            if group and isinstance(group, str):
+                                                contract_addresses.add(group)
+                                    elif isinstance(match, str):
+                                        contract_addresses.add(match)
+                        
+            except Exception as e:
+                logger.debug(f"Error processing entity {type(entity).__name__}: {e}")
+                continue
+    
+    # Extract from additional formats
+    for text in all_texts:
+        additional_addresses = extract_from_additional_formats(text)
+        contract_addresses.update(additional_addresses)
+    
+    # Handle split addresses (addresses broken across lines or spaces)
+    for text in all_texts:
+        if not text:
+            continue
+        # Look for potential split addresses
+        words = text.split()
+        for i in range(len(words) - 1):
+            combined = words[i] + words[i + 1]
+            if 32 <= len(combined) <= 44 and re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', combined):
+                contract_addresses.add(combined)
+    
+    # Clean and validate contract addresses
+    validated_addresses: Set[str] = set()
+    for ca in contract_addresses:
+        # Basic validation: should be 32-44 characters, Base58
+        if 32 <= len(ca) <= 44 and re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', ca):
+            validated_addresses.add(ca)
+    
+    return validated_addresses
+
+
+def extract_from_additional_formats(text: str) -> Set[str]:
+    """
+    Extract contract addresses from additional text formats and edge cases.
+    """
+    addresses: Set[str] = set()
+    
+    if not text:
+        return addresses
+    
+    # Handle common formatting variations
+    text_variants = [
+        text,
+        text.replace('\n', ' '),
+        text.replace('\r', ' '),
+        text.replace('\t', ' '),
+        text.replace('  ', ' '),  # Double spaces
+        text.replace('`', ''),     # Remove backticks
+        text.replace('*', ''),     # Remove asterisks
+        text.replace('_', ''),     # Remove underscores
+        text.replace('~', ''),     # Remove tildes
+    ]
+    
+    for variant in text_variants:
+        for pattern in CA_PATTERNS:
+            try:
+                matches = pattern.findall(variant)
+                if isinstance(matches, list):
+                    for match in matches:
+                        if isinstance(match, tuple):
+                            for group in match:
+                                if group and isinstance(group, str):
+                                    addresses.add(group)
+                        elif isinstance(match, str):
+                            addresses.add(match)
+            except Exception:
+                continue
+    
+    return addresses
+
+
+def normalize_text_for_extraction(text: str) -> str:
+    """
+    Normalize text to improve contract address detection.
+    Handles various formatting issues and edge cases.
+    """
+    if not text:
+        return ""
+    
+    # Remove common formatting characters that might interfere
+    normalized = text
+    
+    # Handle zero-width characters
+    normalized = re.sub(r'[\u200b-\u200d\ufeff]', '', normalized)
+    
+    # Handle various quote types
+    normalized = normalized.replace('"', '"').replace('"', '"')
+    normalized = normalized.replace(''', "'").replace(''', "'")
+    
+    # Handle various dash types
+    normalized = normalized.replace('–', '-').replace('—', '-')
+    
+    # Handle various space types
+    normalized = re.sub(r'[\u00a0\u2000-\u200a\u202f\u205f\u3000]', ' ', normalized)
+    
+    # Normalize multiple spaces
+    normalized = re.sub(r'\s+', ' ', normalized)
+    
+    return normalized.strip()
 
 
 class Bot:
@@ -86,25 +329,29 @@ class Bot:
             username = getattr(sender, "username", None)
             channel_key = ("@" + username) if username else group_name
 
-            text = event.raw_text or ""
-            match = CA_PATTERN.search(text)
-            if not match:
+            # Extract contract addresses using enhanced method
+            contract_addresses = extract_contract_addresses_from_message(event)
+            
+            if not contract_addresses:
                 return
-            ca = match.group(1)
-            new_count = self.coin_counts.get(ca, 0) + 1
-            self.coin_counts[ca] = new_count
-            logger.info(f"Detected CA {ca} in {group_name} (Count: {new_count})")
+            
+            # Process each detected contract address
+            for ca in contract_addresses:
+                new_count = self.coin_counts.get(ca, 0) + 1
+                self.coin_counts[ca] = new_count
+                logger.info(f"Detected CA {ca} in {group_name} (Count: {new_count})")
 
-            if ENABLE_EVALUATOR and self.evaluator:
-                await self.evaluator.process_mention(ca, channel_key)
-                # prune periodically to avoid growth
-                if self.evaluator and (len(self.evaluator.state.mentions_by_ca) % 25 == 0):
-                    self.evaluator.prune_memory()
-            elif ENABLE_TIERED_ALERTS:
-                await self._maybe_send_tiered_alert(ca, group_name, new_count)
-            else:
-                if new_count == HOT_THRESHOLD:
-                    await self._send_alert_message(ca, tier_label=f"T3 x{HOT_THRESHOLD}", header_prefix=">>> ALERT", group_name=group_name)
+                if ENABLE_EVALUATOR and self.evaluator:
+                    await self.evaluator.process_mention(ca, channel_key)
+                    # prune periodically to avoid growth
+                    if self.evaluator and (len(self.evaluator.state.mentions_by_ca) % 25 == 0):
+                        self.evaluator.prune_memory()
+                elif ENABLE_TIERED_ALERTS:
+                    await self._maybe_send_tiered_alert(ca, group_name, new_count)
+                else:
+                    if new_count == HOT_THRESHOLD:
+                        await self._send_alert_message(ca, tier_label=f"T3 x{HOT_THRESHOLD}", header_prefix=">>> ALERT", group_name=group_name)
+                        
         except Exception as e:
             logger.exception(f"Handler error: {e}")
 

@@ -20,7 +20,7 @@ pip install -r requirements.txt
 3. Create a `.env` file and fill in your credentials:
    - `API_ID`, `API_HASH` (required)
    - `TARGET_GROUP`, `MONITORED_GROUPS`
-   - `SOLANA_RPC_URLS`, optional `BIRDEYE_API_KEY`
+   - `SOLANA_RPC_URLS`
 
 ### Run
 ```bash
@@ -65,7 +65,7 @@ Key environment variables (defaults exist; see `config/config.py`):
 - Philosophy-driven tiers:
   - Tier 2 (Confirmation): `T2_HOLDERS_MIN` (default 250), `T2_LIQ_MIN_USD` (50_000), `T2_LIQ_DRAWDOWN_MAX_PCT` (10), `T2_TXNS_H1_MIN` (500), `T2_BUY_SELL_RATIO_MIN` (1.5), `T2_AGE_MIN_MINUTES` (30), `T2_AGE_MAX_MINUTES` (90)
   - Tier 3 (Momentum): `T3_MCAP_MIN_USD` (500_000), `T3_VOL24_MIN_USD` (2_000_000), `T3_PRICE_MIN_X` (5), `T3_PRICE_MAX_X` (20), `T3_HOLDERS_MIN` (1500), `T3_POS_TREND_REQUIRED` (true), `T3_AGE_MIN_MINUTES` (120), `T3_AGE_MAX_MINUTES` (240)
-- APIs: `SOLANA_RPC_URLS`, `ENABLE_BIRDEYE`, `BIRDEYE_API_KEY`
+- APIs: `SOLANA_RPC_URLS`
 - Logging: `LOG_LEVEL`, `LOG_JSON`, `LOG_FILE`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`
 
 ### Notes

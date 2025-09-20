@@ -146,8 +146,7 @@ SOLANA_RPC_URLS: List[str] = [_normalize_url(url) for url in os.getenv(
     "https://api.mainnet-beta.solana.com,https://rpc.ankr.com/solana",
 ).split(',') if url.strip()]
 
-ENABLE_BIRDEYE = _env_bool("ENABLE_BIRDEYE", False)
-BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "").strip()
+# Birdeye API removed - not working
 
 
 # ================== NETWORKING & LOGGING ==================
@@ -230,8 +229,36 @@ def setup_logging() -> None:
 # ================== REGEX (contract address) ==================
 import re
 
-# 32–44 Base58 chars, excluding ambiguous 0 O I l, with boundaries
+# Enhanced patterns for different contract address formats
+# Main pattern: 32–44 Base58 chars, excluding ambiguous 0 O I l, with boundaries
 CA_PATTERN = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])")
+
+# Additional patterns for edge cases and different formats
+CA_PATTERNS = [
+    # Standard Base58 pattern (primary)
+    re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])"),
+    
+    # Pattern for addresses that might have been split across lines
+    re.compile(r"([1-9A-HJ-NP-Za-km-z]{16,22})\s*([1-9A-HJ-NP-Za-km-z]{16,22})"),
+    
+    # Pattern for addresses in URLs or links
+    re.compile(r"(?:token|mint|address)[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})", re.IGNORECASE),
+    
+    # Pattern for addresses with common prefixes
+    re.compile(r"(?:CA|Contract|Token)[\s:=]*([1-9A-HJ-NP-Za-km-z]{32,44})", re.IGNORECASE),
+    
+    # Pattern for addresses in code blocks or monospace
+    re.compile(r"`([1-9A-HJ-NP-Za-km-z]{32,44})`"),
+    
+    # Pattern for addresses with quotes
+    re.compile(r"['\"]([1-9A-HJ-NP-Za-km-z]{32,44})['\"]"),
+    
+    # Pattern for addresses with parentheses
+    re.compile(r"\(([1-9A-HJ-NP-Za-km-z]{32,44})\)"),
+    
+    # Pattern for addresses with brackets
+    re.compile(r"\[([1-9A-HJ-NP-Za-km-z]{32,44})\]"),
+]
 
 
 # ================== STATE & HEALTH ==================

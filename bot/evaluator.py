@@ -21,8 +21,6 @@ from config.config import (
     LIQ_MIN_USD,
     VOL24_MIN_USD,
     T1_MARKET_REQUIRED,
-    ENABLE_BIRDEYE,
-    BIRDEYE_API_KEY,
     # philosophy thresholds
     T2_HOLDERS_MIN,
     T2_LIQ_MIN_USD,
@@ -40,7 +38,7 @@ from config.config import (
     T3_AGE_MIN_MINUTES,
     T3_AGE_MAX_MINUTES,
 )
-from bot.apis import get_birdeye_overview, get_dex_metrics, solana_get_account_info, solana_rpc
+from bot.apis import get_dex_metrics, solana_get_account_info, solana_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -175,17 +173,7 @@ class Evaluator:
     async def holders_and_whales_ok(self, ca: str) -> bool:
         # Conservative default on failure: False
         try:
-            if ENABLE_BIRDEYE and BIRDEYE_API_KEY:
-                d = await get_birdeye_overview(ca)
-                holders = int(d.get('holder') or d.get('holders') or d.get('holders_count') or 0)
-                largest = float(
-                    d.get('largest_holder_percent') or
-                    d.get('top_holder_percent') or
-                    d.get('top_holders_percent') or
-                    d.get('topHoldersPercent') or 0
-                )
-                return holders >= HOLDERS_THRESHOLD and largest <= LARGEST_WALLET_MAX
-            # Fallback to RPC approximation
+            # Use RPC approximation for holder data
             supply_info = await solana_rpc("getTokenSupply", [ca])
             supply = float((((supply_info or {}).get('value') or {}).get('uiAmount')) or 0)
             if supply <= 0:
@@ -275,20 +263,10 @@ class Evaluator:
                 age_min = (now - self.state.first_seen_ts[ca]).total_seconds() / 60.0
 
             if age_min is not None and T2_AGE_MIN_MINUTES <= age_min <= T2_AGE_MAX_MINUTES:
-                # Holders and whales using Birdeye if available
+                # Holders and whales check using RPC
                 holders_ok = False
-                holders_count = 0
-                largest_pct = 100.0
                 try:
-                    if ENABLE_BIRDEYE and BIRDEYE_API_KEY:
-                        d = await get_birdeye_overview(ca)
-                        holders_count = int(d.get('holder') or d.get('holders') or d.get('holders_count') or 0)
-                        largest_pct = float(
-                            d.get('largest_holder_percent') or d.get('top_holder_percent') or d.get('top_holders_percent') or d.get('topHoldersPercent') or 100
-                        )
-                        holders_ok = holders_count >= T2_HOLDERS_MIN and largest_pct <= LARGEST_WALLET_MAX
-                    else:
-                        holders_ok = await self.holders_and_whales_ok(ca)
+                    holders_ok = await self.holders_and_whales_ok(ca)
                 except Exception:
                     holders_ok = False
 
@@ -329,15 +307,11 @@ class Evaluator:
                     price_ok and
                     trend_ok
                 ):
-                    # holders threshold for T3
+                    # holders threshold for T3 using RPC
                     holders3_ok = False
                     try:
-                        if ENABLE_BIRDEYE and BIRDEYE_API_KEY:
-                            d = await get_birdeye_overview(ca)
-                            holders3_ok = int(d.get('holder') or d.get('holders') or d.get('holders_count') or 0) >= T3_HOLDERS_MIN
-                        else:
-                            # Fallback: use RPC approximation — weaker but a gate
-                            holders3_ok = await self.holders_and_whales_ok(ca)
+                        # Use RPC approximation for T3 holder check
+                        holders3_ok = await self.holders_and_whales_ok(ca)
                     except Exception:
                         holders3_ok = False
                     if holders3_ok:
@@ -364,12 +338,7 @@ class Evaluator:
 
         channels_line = _summarize_channels(self.state.mentions_by_ca.get(ca, []))
         holders_str = '-'
-        try:
-            if ENABLE_BIRDEYE and BIRDEYE_API_KEY:
-                d = await get_birdeye_overview(ca)
-                holders_str = str(int(d.get('holder') or d.get('holders') or d.get('holders_count') or 0))
-        except Exception:
-            holders_str = '-'
+        # Note: Holder count not available without Birdeye API
 
         msg = (
             f"{'🔥 Consensus T1' if classification=='T1' else ('🚀 UPGRADE: T2' if classification=='T2' else '🚀🚀 UPGRADE: T3')} — ${symbol or '?'}\n"

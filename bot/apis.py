@@ -126,22 +126,7 @@ async def get_dex_metrics(ca: str) -> Dict[str, Any]:
 
 
 # ================== Birdeye ==================
-async def get_birdeye_overview(ca: str) -> Dict[str, Any]:
-    if not ENABLE_BIRDEYE or not BIRDEYE_API_KEY:
-        return {}
-    url = f"https://public-api.birdeye.so/defi/token_overview?address={ca}"
-    headers = {
-        "X-API-KEY": BIRDEYE_API_KEY,
-        "x-chain": "solana",
-        "accept": "application/json",
-        "user-agent": "Mozilla/5.0",
-    }
-    try:
-        data = await http_client.get_json(url, headers=headers)
-        return (data.get('data') or {})
-    except Exception as e:
-        logger.warning(f"Birdeye overview failed for {ca}: {e}")
-        return {}
+# Birdeye API removed - not working
 
 
 # ================== Solana RPC ==================
