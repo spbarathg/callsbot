@@ -47,6 +47,11 @@ docker build -t callsbot .
 docker run --rm -it --env-file .env callsbot
 ```
 
+Compose (see `docker/docker-compose.yml`):
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
 ### systemd
 Use `deploy/callsbot.service` as a reference or install roughly as:
 ```bash
@@ -82,6 +87,7 @@ When enabled, the bot forwards every Signal and Outcome event as JSON to the web
 ### Notes
 - Create a `.gitignore` to exclude `.env`, Telethon session files, `var/`, SQLite DBs, and SSH keys.
 - Windows compatibility handled automatically.
+- See additional docs in `docs/` (Runbook, Alerts).
 
 ### Philosophy-driven tiers (behavior)
 - T1 (Consensus): Social-only unique group consensus. Captures safe launch and initial traction.

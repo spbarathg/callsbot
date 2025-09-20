@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Set
 
 from telethon import TelegramClient, events
@@ -278,7 +278,7 @@ class Bot:
         self.coin_counts: dict[str, int] = {}
         self.coin_tier_state: dict[str, int] = {}
         self.last_t1_sent_utc: dict[str, datetime] = {}
-        self.last_reset_utc = datetime.utcnow()
+        self.last_reset_utc = datetime.now(timezone.utc)
         self._bg_tasks: set[asyncio.Task] = set()
         self._stop_event = asyncio.Event()
 
@@ -305,9 +305,9 @@ class Bot:
     def _maybe_reset_counts(self) -> None:
         if HOT_RESET_HOURS <= 0:
             return
-        if datetime.utcnow() - self.last_reset_utc >= timedelta(hours=HOT_RESET_HOURS):
+        if datetime.now(timezone.utc) - self.last_reset_utc >= timedelta(hours=HOT_RESET_HOURS):
             self.coin_counts = {}
-            self.last_reset_utc = datetime.utcnow()
+            self.last_reset_utc = datetime.now(timezone.utc)
             logger.info("Hot counts reset due to window elapsed")
         # Guardrail: cap coin_counts size to avoid unbounded memory
         max_entries = 5000
@@ -341,7 +341,7 @@ class Bot:
                 # Record mention row for analytics
                 try:
                     if self.stats:
-                        await self.stats.record_mention(datetime.utcnow().isoformat() + "Z", ca, channel_key, str(getattr(event.message, 'id', '')))
+                        await self.stats.record_mention(datetime.now(timezone.utc).isoformat(), ca, channel_key, str(getattr(event.message, 'id', '')))
                 except Exception:
                     pass
 
@@ -359,7 +359,7 @@ class Bot:
                 try:
                     if self.stats:
                         ev = SignalEvent(
-                            ts_utc=datetime.utcnow().isoformat() + "Z",
+                            ts_utc=datetime.now(timezone.utc).isoformat(),
                             ca=ca,
                             symbol=None,
                             classification="RAW",
@@ -394,7 +394,7 @@ class Bot:
                     mentions = st.mentions_by_ca.get(ca, [])
                     channels = list({m.channel for m in mentions})[:5]
                     ev = SignalEvent(
-                        ts_utc=datetime.utcnow().isoformat() + "Z",
+                        ts_utc=datetime.now(timezone.utc).isoformat(),
                         ca=ca,
                         symbol=dex.get('symbol'),
                         classification=classification,
@@ -449,7 +449,7 @@ class Bot:
     async def _maybe_send_tiered_alert(self, ca: str, group_name: str, count: int) -> None:
         highest = self.coin_tier_state.get(ca, 0)
         if T1_IMMEDIATE and count == 1 and highest < 1:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             last_ts = self.last_t1_sent_utc.get(ca)
             if COOLDOWN_MINUTES_T1 > 0 and last_ts is not None:
                 if (now - last_ts) < timedelta(minutes=COOLDOWN_MINUTES_T1):

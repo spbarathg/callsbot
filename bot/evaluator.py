@@ -365,7 +365,7 @@ class Evaluator:
         try:
             if self.stats:
                 ev = SignalEvent(
-                    ts_utc=datetime.utcnow().isoformat() + "Z",
+                    ts_utc=datetime.now(timezone.utc).isoformat(),
                     ca=ca,
                     symbol=symbol,
                     classification=classification,

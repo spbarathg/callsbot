@@ -24,25 +24,14 @@ async def _run() -> None:
     setup_logging()
     validate_required_config()
     validate_ranges()
+    # Create bot
+    bot = Bot()
     if METRICS_ENABLED:
-        # Start observability server (metrics + health)
-        # we pass a placeholder for bot initially; set actual bot after creation below
-        obs_task = asyncio.create_task(start_observability_server(bot=None, http_client=http_client, port=METRICS_PORT))
+        # Start observability server (metrics + health) with real bot reference
+        asyncio.create_task(start_observability_server(bot=bot, http_client=http_client, port=METRICS_PORT))
     await http_client.start()
 
-    bot = Bot()
-    # Update observability server context with bot once created
-    try:
-        # Late bind: replace app context after server starts
-        # This is best-effort and non-fatal if server not yet ready
-        from aiohttp import web
-        async def _bind_bot():
-            await asyncio.sleep(0.1)
-            # Access runner via closure in start_observability_server - not exposed; skip if not available
-            pass
-        asyncio.create_task(_bind_bot())
-    except Exception:
-        pass
+    
     await bot.start()
     # Initialize stats DB if enabled
     try:
