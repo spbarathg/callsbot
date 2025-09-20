@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 
 # Load .env early
 load_dotenv()
+# ================== METRICS ==================
+METRICS_ENABLED = _env_bool("METRICS_ENABLED", True)
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9000"))
+
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -153,6 +157,8 @@ HTTP_TIMEOUT_SEC = float(os.getenv("HTTP_TIMEOUT_SEC", "15"))
 HTTP_RETRIES = int(os.getenv("HTTP_RETRIES", "3"))
 RETRY_BACKOFF_SEC = float(os.getenv("RETRY_BACKOFF_SEC", "1.5"))
 RPC_MAX_RPS = float(os.getenv("RPC_MAX_RPS", "10"))  # max RPC requests per second (approx)
+RPC_MAX_CONCURRENCY = int(os.getenv("RPC_MAX_CONCURRENCY", "10"))
+HTTP_MAX_CONCURRENCY = int(os.getenv("HTTP_MAX_CONCURRENCY", "10"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_JSON = _env_bool("LOG_JSON", False)
@@ -170,6 +176,9 @@ STATS_ROI_HORIZONS_MIN = [int(x) for x in (os.getenv("STATS_ROI_HORIZONS_MIN", "
 STATS_DAILY_ROLLOVER_HOUR_UTC = int(os.getenv("STATS_DAILY_ROLLOVER_HOUR_UTC", "0"))
 STATS_DB_PATH = os.getenv("STATS_DB_PATH", "var/stats.db")
 STATS_SNAPSHOT_INTERVAL_SEC = int(os.getenv("STATS_SNAPSHOT_INTERVAL_SEC", "60"))
+STATS_JSONL_MAX_BYTES = int(os.getenv("STATS_JSONL_MAX_BYTES", str(50 * 1024 * 1024)))  # 50MB
+STATS_MAX_JSONL_FILES = int(os.getenv("STATS_MAX_JSONL_FILES", "30"))
+STATS_MAINTENANCE_INTERVAL_SEC = int(os.getenv("STATS_MAINTENANCE_INTERVAL_SEC", str(60 * 60)))  # hourly
 
 
 # ================== PHANES INTEGRATION ==================
@@ -189,6 +198,69 @@ def validate_required_config() -> None:
         missing.append("TARGET_GROUP")
     if missing:
         raise SystemExit(f"Missing required configuration: {', '.join(missing)}. Set them in .env or environment.")
+
+
+# ================== Pydantic validation ==================
+try:
+    from pydantic import BaseModel, Field, ValidationError, field_validator
+
+    class _ThresholdsModel(BaseModel):
+        MIN_UNIQUE_CHANNELS_T1: int = Field(ge=1)
+        T2_AGE_MIN_MINUTES: int = Field(ge=0)
+        T2_AGE_MAX_MINUTES: int = Field(gt=0)
+        T3_AGE_MIN_MINUTES: int = Field(ge=0)
+        T3_AGE_MAX_MINUTES: int = Field(gt=0)
+        LIQ_MIN_USD: float = Field(ge=0)
+        T2_LIQ_MIN_USD: float = Field(ge=0)
+        T2_LIQ_DRAWDOWN_MAX_PCT: float = Field(ge=0, le=100)
+        T3_MCAP_MIN_USD: float = Field(ge=0)
+        T3_VOL24_MIN_USD: float = Field(ge=0)
+        T3_PRICE_MIN_X: float = Field(gt=0)
+        T3_PRICE_MAX_X: float = Field(gt=0)
+
+        @field_validator("T2_AGE_MAX_MINUTES")
+        @classmethod
+        def _t2_age(cls, v, info):
+            if v < info.data.get("T2_AGE_MIN_MINUTES", 0):
+                raise ValueError("T2_AGE_MAX_MINUTES must be >= T2_AGE_MIN_MINUTES")
+            return v
+
+        @field_validator("T3_AGE_MAX_MINUTES")
+        @classmethod
+        def _t3_age(cls, v, info):
+            if v < info.data.get("T3_AGE_MIN_MINUTES", 0):
+                raise ValueError("T3_AGE_MAX_MINUTES must be >= T3_AGE_MIN_MINUTES")
+            return v
+
+        @field_validator("T3_PRICE_MAX_X")
+        @classmethod
+        def _price_bounds(cls, v, info):
+            if v <= info.data.get("T3_PRICE_MIN_X", 0):
+                raise ValueError("T3_PRICE_MAX_X must be > T3_PRICE_MIN_X")
+            return v
+
+    def validate_ranges() -> None:
+        try:
+            _ThresholdsModel(
+                MIN_UNIQUE_CHANNELS_T1=MIN_UNIQUE_CHANNELS_T1,
+                T2_AGE_MIN_MINUTES=T2_AGE_MIN_MINUTES,
+                T2_AGE_MAX_MINUTES=T2_AGE_MAX_MINUTES,
+                T3_AGE_MIN_MINUTES=T3_AGE_MIN_MINUTES,
+                T3_AGE_MAX_MINUTES=T3_AGE_MAX_MINUTES,
+                LIQ_MIN_USD=LIQ_MIN_USD,
+                T2_LIQ_MIN_USD=T2_LIQ_MIN_USD,
+                T2_LIQ_DRAWDOWN_MAX_PCT=T2_LIQ_DRAWDOWN_MAX_PCT,
+                T3_MCAP_MIN_USD=T3_MCAP_MIN_USD,
+                T3_VOL24_MIN_USD=T3_VOL24_MIN_USD,
+                T3_PRICE_MIN_X=T3_PRICE_MIN_X,
+                T3_PRICE_MAX_X=T3_PRICE_MAX_X,
+            )
+        except ValidationError as e:
+            raise SystemExit(f"Invalid configuration: {e}")
+except Exception:
+    def validate_ranges() -> None:
+        # Pydantic not installed; skip deep validation
+        return
 
 
 # ================== LOGGING SETUP ==================

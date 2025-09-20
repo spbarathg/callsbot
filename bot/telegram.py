@@ -35,6 +35,7 @@ from config.config import (
 from bot.evaluator import Evaluator
 from bot.utils import read_json, write_json_atomic
 from bot.stats import StatsRecorder, SignalEvent
+from bot.metrics import messages_processed_total, alerts_sent_total, errors_total
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,7 @@ class Bot:
 
     async def _on_message(self, event: events.NewMessage.Event) -> None:
         try:
+            messages_processed_total.inc()
             self._maybe_reset_counts()
             if getattr(event, "is_reply", False) or getattr(event, "fwd_from", None):
                 return
@@ -377,6 +379,7 @@ class Bot:
                     pass
                         
         except Exception as e:
+            errors_total.labels("telegram_handler").inc()
             logger.exception(f"Handler error: {e}")
 
     async def _send_evaluator_message(self, ca: str, classification: str, body: str) -> None:
@@ -433,6 +436,10 @@ class Bot:
         try:
             await self.client.send_message(TARGET_GROUP, msg, link_preview=False)
             logger.info(f"Alert sent [{tier_label}] for {ca}")
+            try:
+                alerts_sent_total.labels(tier_label).inc()
+            except Exception:
+                pass
         except FloodWaitError as e:
             logger.warning(f"Flood wait {e.seconds}s on alert send; delaying...")
             await asyncio.sleep(e.seconds)

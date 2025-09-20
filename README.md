@@ -33,6 +33,7 @@ On first run, Telethon will guide you through login (code/2FA) in the console an
 - The bot persists minimal state to `STATE_FILE` (default `state.json`) so restarts do not resend old alerts. Configure with env vars `STATE_FILE`, `STATE_SAVE_SECONDS`.
 - A heartbeat log prints every `HEALTH_LOG_SECONDS` with counts of groups, coins seen, mentions tracked, and last-ranked tokens.
 - VIP watcher runs only if VIP wallets are configured.
+- Prometheus metrics server (default `:9000`) exposes counters for messages processed, alerts, HTTP/RPC calls, errors, and loop durations. Toggle with `METRICS_ENABLED`, configure port via `METRICS_PORT`.
 
 ### Production notes
 - All I/O is non-blocking; HTTP calls use `aiohttp` with retries and backoff.
@@ -67,6 +68,8 @@ Key environment variables (defaults exist; see `config/config.py`):
   - Tier 3 (Momentum): `T3_MCAP_MIN_USD` (500_000), `T3_VOL24_MIN_USD` (2_000_000), `T3_PRICE_MIN_X` (5), `T3_PRICE_MAX_X` (20), `T3_HOLDERS_MIN` (1500), `T3_POS_TREND_REQUIRED` (true), `T3_AGE_MIN_MINUTES` (120), `T3_AGE_MAX_MINUTES` (240)
 - APIs: `SOLANA_RPC_URLS`
 - Logging: `LOG_LEVEL`, `LOG_JSON`, `LOG_FILE`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`
+- Metrics: `METRICS_ENABLED`, `METRICS_PORT`, `HTTP_MAX_CONCURRENCY`, `RPC_MAX_CONCURRENCY`
+- Stats retention: `STATS_JSONL_MAX_BYTES`, `STATS_MAX_JSONL_FILES`, `STATS_MAINTENANCE_INTERVAL_SEC`
 
 ### Phanes DApp integration
 - Set the following environment variables to forward your bot's analytics to Phanes (or any compatible collector):

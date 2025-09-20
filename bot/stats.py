@@ -15,6 +15,7 @@ from config.config import (
     STATS_DB_PATH,
     STATS_SNAPSHOT_INTERVAL_SEC,
 )
+from config.config import STATS_JSONL_MAX_BYTES, STATS_MAX_JSONL_FILES
 from bot.phanes import phanes_forward_signal, phanes_forward_outcome, phanes_is_enabled
 
 
@@ -196,6 +197,7 @@ class StatsRecorder:
             self._start_price_by_ca[s.ca] = s.price_usd
         obj = asdict(s)
         await asyncio.to_thread(self._append_jsonl, self.signals_path, obj)
+        await asyncio.to_thread(self._rotate_jsonl_if_needed, self.signals_path)
         await self._insert_signal_db(s)
         # Forward to Phanes if configured (fire-and-forget)
         if self._phanes_enabled:
@@ -209,6 +211,7 @@ class StatsRecorder:
             return
         obj = asdict(o)
         await asyncio.to_thread(self._append_jsonl, self.outcomes_path, obj)
+        await asyncio.to_thread(self._rotate_jsonl_if_needed, self.outcomes_path)
         await self._insert_outcome_db(o)
         if self._phanes_enabled:
             try:
@@ -372,6 +375,31 @@ class StatsRecorder:
         _ensure_dir(os.path.dirname(path) or ".")
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, separators=(",", ":")) + "\n")
+
+    def _rotate_jsonl_if_needed(self, path: str) -> None:
+        try:
+            if not os.path.exists(path):
+                return
+            size = os.path.getsize(path)
+            if size < STATS_JSONL_MAX_BYTES:
+                return
+            # rotate old files: path.N -> path.(N+1)
+            for idx in range(STATS_MAX_JSONL_FILES - 1, 0, -1):
+                older = f"{path}.{idx}"
+                newer = f"{path}.{idx + 1}"
+                if os.path.exists(older):
+                    try:
+                        if idx + 1 >= STATS_MAX_JSONL_FILES and os.path.exists(newer):
+                            os.remove(newer)
+                        os.replace(older, newer)
+                    except Exception:
+                        continue
+            try:
+                os.replace(path, f"{path}.1")
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     async def _insert_signal_db(self, s: SignalEvent) -> None:
         if not self.enabled:

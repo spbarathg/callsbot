@@ -3,13 +3,15 @@ import logging
 import os
 import signal
 
-from config.config import setup_logging, validate_required_config
+from config.config import setup_logging, validate_required_config, validate_ranges
 from bot.telegram import Bot
 from bot.apis import http_client
 from bot.apis import get_dex_metrics
 from config.config import STATS_SNAPSHOT_INTERVAL_SEC
 from bot.vip import vip_watcher_loop
 from config.config import ENABLE_STATS
+from config.config import METRICS_ENABLED, METRICS_PORT
+from bot.metrics import start_metrics_server, loop_duration_seconds
 
 
 async def _run() -> None:
@@ -21,6 +23,9 @@ async def _run() -> None:
         pass
     setup_logging()
     validate_required_config()
+    validate_ranges()
+    if METRICS_ENABLED:
+        start_metrics_server(METRICS_PORT)
     await http_client.start()
 
     bot = Bot()
@@ -43,6 +48,8 @@ async def _run() -> None:
                     await asyncio.sleep(max(15, STATS_SNAPSHOT_INTERVAL_SEC))
                     try:
                         if getattr(bot, 'stats', None) and bot.stats.enabled:
+                            import time as _time
+                            _start = _time.perf_counter()
                             cas = list(getattr(bot, 'coin_counts', {}).keys())[:500]
                             for ca in cas:
                                 try:
@@ -53,11 +60,29 @@ async def _run() -> None:
                                         await bot.stats.maybe_record_outcomes_from_snapshots(ca)
                                 except Exception:
                                     continue
+                            loop_duration_seconds.labels("snapshots").observe(_time.perf_counter() - _start)
                     except Exception:
                         pass
             except asyncio.CancelledError:
                 return
         asyncio.create_task(_snapshots_loop())
+
+        # Maintenance loop (VACUUM, JSONL rotation)
+        from config.config import STATS_MAINTENANCE_INTERVAL_SEC
+        async def _maintenance_loop() -> None:
+            try:
+                while not stop_event.is_set():
+                    await asyncio.sleep(STATS_MAINTENANCE_INTERVAL_SEC)
+                    try:
+                        import time as _time
+                        _start = _time.perf_counter()
+                        await bot.stats.maybe_maintain_storage()
+                        loop_duration_seconds.labels("maintenance").observe(_time.perf_counter() - _start)
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                return
+        asyncio.create_task(_maintenance_loop())
     
     # Graceful signal handling (best-effort on Windows)
     loop = asyncio.get_running_loop()

@@ -13,6 +13,9 @@ from config.config import (
     RPC_MAX_RPS,
 )
 from bot.utils import with_retries
+from config.config import HTTP_MAX_CONCURRENCY, RPC_MAX_CONCURRENCY
+from bot.metrics import http_requests_total, http_request_duration_seconds, inflight_http, rpc_calls_total, inflight_rpc
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 class HttpClient:
     def __init__(self) -> None:
         self.session: Optional[aiohttp.ClientSession] = None
+        self._http_sem = asyncio.Semaphore(HTTP_MAX_CONCURRENCY)
 
     async def start(self) -> None:
         if self.session is None or self.session.closed:
@@ -34,14 +38,23 @@ class HttpClient:
         assert self.session is not None
 
         async def _do() -> Dict[str, Any]:
-            async with self.session.get(url, headers=headers) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    raise RuntimeError(f"GET {url} -> {resp.status} {text[:200]}")
+            async with self._http_sem:
+                inflight_http.inc()
                 try:
-                    return json.loads(text)
-                except Exception:
-                    return {"raw": text}
+                    import time as _time
+                    _t0 = _time.perf_counter()
+                    async with self.session.get(url, headers=headers) as resp:
+                        text = await resp.text()
+                        http_request_duration_seconds.labels("dexscreener").observe(_time.perf_counter() - _t0)
+                        http_requests_total.labels("dexscreener", str(resp.status)).inc()
+                        if resp.status != 200:
+                            raise RuntimeError(f"GET {url} -> {resp.status} {text[:200]}")
+                        try:
+                            return json.loads(text)
+                        except Exception:
+                            return {"raw": text}
+                finally:
+                    inflight_http.dec()
 
         return await with_retries(_do, HTTP_RETRIES, RETRY_BACKOFF_SEC)
 
@@ -52,14 +65,24 @@ class HttpClient:
             _headers.update(headers)
 
         async def _do() -> Dict[str, Any]:
-            async with self.session.post(url, json=payload, headers=_headers) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    raise RuntimeError(f"POST {url} -> {resp.status} {text[:200]}")
+            async with self._http_sem:
+                inflight_http.inc()
                 try:
-                    return json.loads(text)
-                except Exception:
-                    return {"raw": text}
+                    import time as _time
+                    _t0 = _time.perf_counter()
+                    async with self.session.post(url, json=payload, headers=_headers) as resp:
+                        text = await resp.text()
+                        target = "phanes" if "phanes" in url else "rpc"
+                        http_request_duration_seconds.labels(target).observe(_time.perf_counter() - _t0)
+                        http_requests_total.labels(target, str(resp.status)).inc()
+                        if resp.status != 200:
+                            raise RuntimeError(f"POST {url} -> {resp.status} {text[:200]}")
+                        try:
+                            return json.loads(text)
+                        except Exception:
+                            return {"raw": text}
+                finally:
+                    inflight_http.dec()
 
         return await with_retries(_do, HTTP_RETRIES, RETRY_BACKOFF_SEC)
 
@@ -149,9 +172,14 @@ async def solana_rpc(method: str, params: list) -> Any:
             await _asyncio.sleep(sleep_for)
         _last_rpc_ts = time.perf_counter()
     try:
+        inflight_rpc.inc()
         data = await http_client.post_json(url, payload)
+        rpc_calls_total.labels(method, "ok").inc()
     except Exception as e:
+        rpc_calls_total.labels(method, "error").inc()
         raise RuntimeError(f"RPC {method} failed: {e}")
+    finally:
+        inflight_rpc.dec()
     if 'error' in data:
         raise RuntimeError(str(data['error']))
     return data.get('result')
