@@ -104,8 +104,7 @@ async def get_dex_metrics(ca: str) -> Dict[str, Any]:
         if p.get('chainId') == 'solana':
             pair = p
             break
-    if not pair and pairs:
-        pair = pairs[0]
+    # Enforce Solana-only: if no Solana pair, treat as not found
     if not pair:
         return {}
     liq = ((pair.get('liquidity') or {}).get('usd')) or 0

@@ -3,6 +3,7 @@ import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Set
+from collections import OrderedDict
 
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, RPCError
@@ -31,11 +32,14 @@ from config.config import (
     STATE_FILE,
     STATE_SAVE_SECONDS,
     HEALTH_LOG_SECONDS,
+    SOLANA_CACHE_CAPACITY,
+    VALIDATIONS_PER_MESSAGE_LIMIT,
 )
 from bot.evaluator import Evaluator
 from bot.utils import read_json, write_json_atomic
 from bot.stats import StatsRecorder, SignalEvent
 from bot.metrics import messages_processed_total, alerts_sent_total, errors_total
+from bot.apis import solana_get_account_info
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,26 @@ class Bot:
         self.last_reset_utc = datetime.now(timezone.utc)
         self._bg_tasks: set[asyncio.Task] = set()
         self._stop_event = asyncio.Event()
+        self._solana_check_cache: "OrderedDict[str, bool]" = OrderedDict()
+        self._solana_cache_capacity = max(1000, int(SOLANA_CACHE_CAPACITY))
+
+    async def _is_solana_mint(self, ca: str) -> bool:
+        # LRU cache lookup
+        if ca in self._solana_check_cache:
+            val = self._solana_check_cache.pop(ca)
+            self._solana_check_cache[ca] = val  # move to end (most recent)
+            return val
+        # Solana RPC account info must exist for a valid mint
+        try:
+            data = await solana_get_account_info(ca)
+            ok = bool(data)
+        except Exception:
+            ok = False
+        # Update LRU cache
+        self._solana_check_cache[ca] = ok
+        if len(self._solana_check_cache) > self._solana_cache_capacity:
+            self._solana_check_cache.popitem(last=False)  # evict least-recently used
+        return ok
 
     async def start(self) -> None:
         await self.client.start()
@@ -333,8 +357,35 @@ class Bot:
             if not contract_addresses:
                 return
             
-            # Process each detected contract address
+            # Process each detected contract address with Solana-only enforcement
+            cached_true: List[str] = []
+            unknown: List[str] = []
             for ca in contract_addresses:
+                if ca in self._solana_check_cache:
+                    if self._solana_check_cache[ca]:
+                        # touch LRU
+                        val = self._solana_check_cache.pop(ca)
+                        self._solana_check_cache[ca] = val
+                        cached_true.append(ca)
+                    else:
+                        # known non-Solana
+                        continue
+                else:
+                    unknown.append(ca)
+
+            # Validate unknowns concurrently (bounded by RPC semaphores inside client)
+            if unknown:
+                # Guard against message bursts: cap validations per message
+                to_check = unknown[:max(0, int(VALIDATIONS_PER_MESSAGE_LIMIT))]
+                results = await asyncio.gather(*[self._is_solana_mint(ca) for ca in to_check], return_exceptions=True)
+                for ca, res in zip(to_check, results):
+                    is_sol = bool(res) if not isinstance(res, Exception) else False
+                    if is_sol:
+                        cached_true.append(ca)
+                    else:
+                        logger.debug(f"Ignoring non-Solana CA {ca} in {group_name}")
+
+            for ca in cached_true:
                 new_count = self.coin_counts.get(ca, 0) + 1
                 self.coin_counts[ca] = new_count
                 logger.info(f"Detected CA {ca} in {group_name} (Count: {new_count})")

@@ -183,6 +183,10 @@ RPC_MAX_RPS = float(os.getenv("RPC_MAX_RPS", "10"))  # max RPC requests per seco
 RPC_MAX_CONCURRENCY = int(os.getenv("RPC_MAX_CONCURRENCY", "10"))
 HTTP_MAX_CONCURRENCY = int(os.getenv("HTTP_MAX_CONCURRENCY", "10"))
 
+# Validation scaling controls
+SOLANA_CACHE_CAPACITY = int(os.getenv("SOLANA_CACHE_CAPACITY", "10000"))
+VALIDATIONS_PER_MESSAGE_LIMIT = int(os.getenv("VALIDATIONS_PER_MESSAGE_LIMIT", "64"))
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_JSON = _env_bool("LOG_JSON", False)
 LOG_FILE = os.getenv("LOG_FILE", "var/bot.log")
